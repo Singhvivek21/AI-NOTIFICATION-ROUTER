@@ -1,0 +1,25 @@
+Please review the following initial routing decision based on the provided context.
+
+**Initial Routing Decision:**
+```json
+{{ initial_decision | tojson(indent=2) }}
+```
+
+**Context:**
+```json
+{{ context | tojson(indent=2) }}
+```
+
+**Historical Evidence:**
+```json
+{{ history | tojson(indent=2) }}
+```
+
+{% if media %}
+**Media Analysis:**
+```json
+{{ media | tojson(indent=2) }}
+```
+{% endif %}
+
+Review the decision rigorously. If the decision is correct, output the identical decision. If it requires correction, output the corrected decision. Return ONLY valid JSON matching the schema.

@@ -1,0 +1,24 @@
+Please calibrate the confidence score for the following routing decision based on the provided context, history, and reflection results.
+
+**Routing Decision:**
+```json
+{{ routing_decision | tojson(indent=2) }}
+```
+
+**Message Context:**
+```json
+{{ context | tojson(indent=2) }}
+```
+
+**Historical Evidence:**
+```json
+{{ history | tojson(indent=2) }}
+```
+
+**Reflection Result:**
+```json
+{{ reflection_result | tojson(indent=2) }}
+```
+
+Adjust ONLY the `confidence` score. Do not change `action`, `message_type`, `reason`, or `evidence_message_ids`. 
+Return the valid JSON object representing the calibrated RoutingDecision.

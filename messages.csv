@@ -1,0 +1,6 @@
+message_id,user_id,conversation_type,group_id,business_id,sender_user_id,created_at,message_text,media_type,media_id,forwarded_count
+msg_023,u_002,business,,business_002,,2026-07-30 22:19,"Important Information Dear Customer, Your latest account or card payment update is now available. Please review the details and next steps in your banking app. Team Banking Services",,,0
+msg_091,u_028,personal,,,u_049,2026-07-24 18:07,Your workspace access will expire today. Reply with the 6 digit login code you just received so we can keep your account active.,,,0
+msg_090,u_034,personal,,,u_050,2026-07-20 15:02,"Hi, is this Arun from Bluebell Apartments? I got this number from the courier desk for a package mix-up. No urgency, just checking before I call them again.",,,0
+msg_048,u_011,group,group_011,,u_053,2026-07-20 08:51,"Admin notice: penalty list is being finalized tonight. Scan this QR and pay the clearance amount immediately, otherwise your access card may be blocked tomorrow morning.",,,2
+msg_040,u_007,group,group_001,,u_051,2026-07-31 08:02,"@u_007 forward this to ten people for blessings. Do not ignore, luck changes when you share. Sending to all family groups.",,,7

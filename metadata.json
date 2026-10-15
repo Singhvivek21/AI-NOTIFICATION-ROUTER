@@ -1,0 +1,6 @@
+{
+  "name": "AI Hackathon Workspace",
+  "description": "A foundation for building scalable, agentic AI solutions for the hackathon.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

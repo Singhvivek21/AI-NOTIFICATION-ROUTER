@@ -1,0 +1,31 @@
+{% if few_shot_examples %}
+### Examples of Similar Routing Decisions
+{% for example in few_shot_examples %}
+- Message: "{{ example.message_text }}" ({{ example.conversation_type }}, Media: {{ example.media_type }})
+  Expected Action: {{ example.expected_action }}
+  Expected Type: {{ example.expected_message_type }}
+  Reason: {{ example.expected_reason }}
+{% endfor %}
+{% endif %}
+
+### Current Message to Route
+
+**Context:**
+```json
+{{ context | tojson(indent=2) }}
+```
+
+**Historical Evidence:**
+```json
+{{ history | tojson(indent=2) }}
+```
+
+{% if media %}
+**Media Analysis:**
+```json
+{{ media | tojson(indent=2) }}
+```
+{% endif %}
+
+Based on the information above, determine the optimal routing action and message type for this message.
+Remember to return ONLY a valid JSON object matching the requested schema.
