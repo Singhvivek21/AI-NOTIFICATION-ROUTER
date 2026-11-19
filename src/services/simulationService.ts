@@ -3,13 +3,12 @@ import { RoutingDecision } from './notificationService';
 
 export interface SimulationStatus {
   id: string;
+  scenarioId: string;
   status: 'idle' | 'running' | 'completed' | 'failed';
   currentStep: number;
   totalSteps: number;
   progress: number;
   message?: string;
-  startedAt?: string;
-  completedAt?: string;
   decision?: RoutingDecision;
 }
 
@@ -23,11 +22,21 @@ export interface SystemAnalytics {
 
 export interface ScenarioData {
   id: string;
+  userId: string;
   label: string;
+  tag: string;
   icon: string;
   description: string;
   sender: string;
+  channelName: string;
   type: 'business' | 'group' | 'personal';
+  isVerified: boolean;
+  createdAt: string;
+  forwardedCount: number;
+  mediaType: string;
+  mediaId: string;
+  mediaPath: string | null;
+  riskFlags: string[];
   decision: RoutingDecision;
 }
 
@@ -37,13 +46,15 @@ export const simulationService = {
     return response.data;
   },
 
-  startSimulation: async (scenarioId: string = 'default'): Promise<{ simulationId: string }> => {
-    const response = await api.post<{ simulationId: string }>('/simulation/start', { scenarioId });
+  startSimulation: async (
+    scenarioId: string = 'msg_026',
+    useLiveGemini = false
+  ): Promise<{ simulationId: string }> => {
+    const response = await api.post<{ simulationId: string }>('/simulation/start', {
+      scenarioId,
+      useLiveGemini,
+    });
     return response.data;
-  },
-
-  stopSimulation: async (simulationId: string): Promise<void> => {
-    await api.post(`/simulation/${simulationId}/stop`);
   },
 
   getSimulationStatus: async (simulationId: string): Promise<SimulationStatus> => {

@@ -95,15 +95,24 @@ class ConfidenceCalibrator:
             adjustment -= 0.10 # Agents disagreed, inherently lowers certainty
             calibration_notes.append("Agents disagreed during reflection; confidence penalized.")
 
-        # Factor 8: Business Verification
+        # Factor 8: Business Verification, Domain Spoofing & Opt-Out
         if context.business:
-            if context.business.is_verified:
+            if context.business.domain_mismatch:
+                if reflected_decision.action == Action.MUTE:
+                    adjustment += 0.08
+                else:
+                    adjustment -= 0.25
+                    calibration_notes.append("Domain spoofing mismatch detected on unverified business.")
+            elif context.business.is_verified:
                 adjustment += 0.05
-            elif context.business.report_count > 0 and reflected_decision.action != Action.MUTE:
-                adjustment -= 0.10
-                calibration_notes.append("Unverified business with reports penalized.")
+            elif context.business.report_count >= 15 and reflected_decision.action != Action.MUTE:
+                adjustment -= 0.15
+                calibration_notes.append("Unverified business with high user reports penalized.")
+            if context.business.has_opted_out and reflected_decision.action == Action.NOTIFY:
+                adjustment -= 0.15
+                calibration_notes.append("User explicitly opted out of promotions for this business.")
 
-        # Factor 9: Group Trust
+        # Factor 9: Group Trust & Prompt Injection Defense
         if context.group:
             if context.group.is_admin or context.group.sender_role == 'admin':
                 adjustment += 0.05
@@ -111,8 +120,14 @@ class ConfidenceCalibrator:
                 adjustment -= 0.15
                 calibration_notes.append("Group is globally muted by user.")
 
+        if context.features.prompt_injection_suspected:
+            if reflected_decision.action == Action.MUTE:
+                adjustment += 0.06
+            else:
+                adjustment -= 0.30
+                calibration_notes.append("Adversarial prompt-injection attempt detected in message body.")
+
         # Factor 10: Ambiguity Detection
-        # High trust AND high spam indicates an ambiguous/conflicting state
         if trust > 0.5 and spam > 0.5:
             adjustment -= 0.15
             calibration_notes.append("Highly ambiguous context (mixed trust/spam signals).")

@@ -113,54 +113,46 @@ class PromptBuilder:
             logger.error(f"Template not found during rendering: {template_name}")
             raise TemplateMissingError(f"Template missing: {template_name}")
 
-    def _get_dynamic_few_shot(self, context: MessageContext, limit: int = 3) -> List[Dict[str, Any]]:
+    def _get_dynamic_few_shot(self, context: MessageContext, limit: int = 4) -> List[Dict[str, Any]]:
         """
-        Dynamically selects the best few-shot examples for the current message.
-        Joins sample_messages.csv (ground truth) with messages.csv (features)
-        to calculate a relevance score based on conversation type and media presence.
+        Dynamically selects the best few-shot examples directly from sample_messages.csv,
+        which already includes conversation_type, media_type, message_text, and ground-truth labels.
         """
         try:
             samples_df = csv_loader.get_sample_messages()
-            messages_df = csv_loader.get_messages()
-            
-            if samples_df.empty or messages_df.empty:
+            if samples_df.empty:
                 return []
-                
-            # Join samples with base messages to get conversation_type and media_type
-            merged_df = pd.merge(samples_df, messages_df, on="message_id", how="inner")
-            if merged_df.empty:
-                return []
-            
-            # Calculate a simple relevance score
+
             target_conv = context.message_metadata.conversation_type
             target_media = context.message_metadata.media_type
-            
+
             def calculate_score(row: pd.Series) -> int:
                 score = 0
-                if row.get('conversation_type') == target_conv:
+                if str(row.get("conversation_type", "")) == target_conv:
+                    score += 3
+                row_media = str(row.get("media_type", "") or "text")
+                if row_media == target_media:
                     score += 2
-                if row.get('media_type') == target_media:
-                    score += 1
+                if context.features.prompt_injection_suspected and "ignore all previous" in str(row.get("message_text", "")).lower():
+                    score += 5
                 return score
-                
-            merged_df['relevance'] = merged_df.apply(calculate_score, axis=1)
-            
-            # Sort by relevance and grab top N
-            best_matches = merged_df.sort_values(by='relevance', ascending=False).head(limit)
-            
-            # Convert to list of dicts for Jinja
+
+            scored_df = samples_df.copy()
+            scored_df["relevance"] = scored_df.apply(calculate_score, axis=1)
+            best_matches = scored_df.sort_values(by="relevance", ascending=False).head(limit)
+
             examples = []
             for _, row in best_matches.iterrows():
                 examples.append({
-                    "message_text": row.get("message_text", ""),
-                    "conversation_type": row.get("conversation_type", ""),
-                    "media_type": row.get("media_type", ""),
-                    "expected_action": row.get("action", ""),
-                    "expected_message_type": row.get("message_type", ""),
-                    "expected_reason": row.get("reason", "")
+                    "message_text": str(row.get("message_text", "") or "[media only]"),
+                    "conversation_type": str(row.get("conversation_type", "")),
+                    "media_type": str(row.get("media_type", "") or "text"),
+                    "expected_action": str(row.get("action", "")),
+                    "expected_message_type": str(row.get("message_type", "")),
+                    "expected_reason": str(row.get("reason", "")),
                 })
             return examples
-            
+
         except Exception as e:
             logger.warning(f"Failed to retrieve dynamic few-shot examples: {e}")
             return []

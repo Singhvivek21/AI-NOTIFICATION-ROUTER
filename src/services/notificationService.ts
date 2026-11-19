@@ -1,5 +1,18 @@
 import api from './api';
-import { RoutingAction } from '../components/shared/DecisionCard';
+import type { RoutingAction } from '../components/shared/DecisionCard';
+
+export type MessageType =
+  | 'personal'
+  | 'urgent'
+  | 'event'
+  | 'payment'
+  | 'business_update'
+  | 'promotion'
+  | 'greeting'
+  | 'forward'
+  | 'spam'
+  | 'scam'
+  | 'unknown';
 
 export interface MessagePayload {
   id: string;
@@ -14,40 +27,23 @@ export interface RoutingDecision {
   id: string;
   messageId: string;
   action: RoutingAction;
+  messageType: MessageType;
   reason: string;
   confidence: number;
+  confidenceUnit: number;
   evidenceIds: string[];
   trustScore: number;
   spamProbability: number;
   urgency: number;
   reflectionResult: string;
   processedAt: string;
+  source: 'context-engine' | 'gemini-live';
+  modelUsed?: string;
 }
 
 export const notificationService = {
-  /**
-   * Submit a new message to the AI routing pipeline
-   */
-  processMessage: async (payload: MessagePayload): Promise<RoutingDecision> => {
-    const response = await api.post<RoutingDecision>('/notifications/process', payload);
-    return response.data;
-  },
-
-  /**
-   * Fetch historical routing decisions
-   */
-  getDecisionHistory: async (limit: number = 20): Promise<RoutingDecision[]> => {
-    const response = await api.get<RoutingDecision[]>('/notifications/history', {
-      params: { limit },
-    });
-    return response.data;
-  },
-
-  /**
-   * Get a specific decision by ID
-   */
-  getDecisionById: async (id: string): Promise<RoutingDecision> => {
-    const response = await api.get<RoutingDecision>(`/notifications/decisions/${id}`);
+  routeMessageLive: async (messageId: string): Promise<{ decision: RoutingDecision }> => {
+    const response = await api.post<{ decision: RoutingDecision }>(`/messages/${encodeURIComponent(messageId)}/route`);
     return response.data;
   },
 };

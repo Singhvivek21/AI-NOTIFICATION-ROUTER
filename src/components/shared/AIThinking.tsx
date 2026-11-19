@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { 
-  MessageSquareText, 
-  Network, 
-  History, 
-  ScanEye, 
-  Zap, 
-  BrainCircuit, 
-  SlidersHorizontal, 
+import { motion } from 'motion/react';
+import {
+  MessageSquareText,
+  Network,
+  History,
+  ScanEye,
+  Zap,
+  BrainCircuit,
+  SlidersHorizontal,
   CheckCircle2,
-  Loader2
+  Loader2,
 } from 'lucide-react';
 import { cn, animationConfig } from '../../theme';
 
@@ -18,24 +18,26 @@ export interface AIThinkingProps {
   onComplete?: () => void;
   className?: string;
   speedMs?: number;
+  modeLabel?: string;
 }
 
 const PIPELINE_STEPS = [
-  { id: 'incoming', label: 'Incoming Message', icon: MessageSquareText },
-  { id: 'context', label: 'Building Context', icon: Network },
-  { id: 'history', label: 'Retrieving History', icon: History },
-  { id: 'media', label: 'Analyzing Media', icon: ScanEye },
-  { id: 'flash', label: 'Gemini Flash Pass', icon: Zap },
-  { id: 'reflection', label: 'Pro Reflection', icon: BrainCircuit },
+  { id: 'incoming', label: 'Parse Incoming Message', icon: MessageSquareText },
+  { id: 'context', label: 'Join User, Business & Group CSVs', icon: Network },
+  { id: 'history', label: 'Match History & Binary Events', icon: History },
+  { id: 'media', label: 'Resolve Media & Risk Signals', icon: ScanEye },
+  { id: 'flash', label: 'Router Pass 1 (Low Thinking)', icon: Zap },
+  { id: 'reflection', label: 'Reflection Audit (High Thinking)', icon: BrainCircuit },
   { id: 'calibration', label: 'Confidence Calibration', icon: SlidersHorizontal },
-  { id: 'decision', label: 'Final Decision', icon: CheckCircle2 },
+  { id: 'decision', label: 'Emit Decision & Sync output.csv', icon: CheckCircle2 },
 ];
 
-export default function AIThinking({ 
-  isActive, 
-  onComplete, 
+export default function AIThinking({
+  isActive,
+  onComplete,
   className,
-  speedMs = 800 
+  speedMs = 360,
+  modeLabel,
 }: AIThinkingProps) {
   const [currentStep, setCurrentStep] = useState<number>(-1);
 
@@ -44,7 +46,6 @@ export default function AIThinking({
       setCurrentStep(-1);
       return;
     }
-
     setCurrentStep(0);
   }, [isActive]);
 
@@ -57,37 +58,41 @@ export default function AIThinking({
       }, speedMs);
       return () => clearTimeout(timer);
     } else if (currentStep === PIPELINE_STEPS.length) {
-      // Small delay after the last step before calling onComplete
       const timer = setTimeout(() => {
         onComplete?.();
-      }, speedMs / 2);
+      }, 220);
       return () => clearTimeout(timer);
     }
   }, [currentStep, isActive, speedMs, onComplete]);
 
   return (
-    <div className={cn("glass-panel rounded-2xl p-6 overflow-hidden", className)}>
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-2">
-          <BrainCircuit className={cn("h-5 w-5", isActive ? "text-accent animate-pulse" : "text-secondary")} />
-          <h3 className="font-semibold text-primary tracking-tight">AI Pipeline Routing</h3>
+    <div className={cn('bg-[#11141C] border border-white/[0.08] rounded-2xl p-5 overflow-hidden', className)}>
+      <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center gap-2.5">
+          <BrainCircuit className={cn('h-4 w-4', isActive ? 'text-blue-400' : 'text-slate-400')} />
+          <h3 className="text-sm font-semibold text-slate-100 tracking-tight">
+            Routing Pipeline Trace
+          </h3>
         </div>
-        {isActive && currentStep < PIPELINE_STEPS.length && (
-          <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-accent/10 border border-accent/20">
-            <Loader2 className="h-3 w-3 text-accent animate-spin" />
-            <span className="text-xs font-medium text-accent">Processing</span>
-          </div>
-        )}
+        <div className="flex items-center gap-2 text-xs font-mono tabular-nums text-slate-400">
+          {isActive && currentStep < PIPELINE_STEPS.length ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 text-blue-400 animate-spin" />
+              <span className="text-blue-400">{modeLabel || 'Running'}</span>
+            </>
+          ) : (
+            <span>{PIPELINE_STEPS.length} stages</span>
+          )}
+        </div>
       </div>
 
-      <div className="relative pl-4 border-l-2 border-white/5 space-y-6">
-        {/* Animated Progress Line */}
+      <div className="relative pl-4 border-l border-white/[0.08] space-y-2.5">
         {isActive && (
           <motion.div
-            className="absolute top-0 left-[-2px] w-0.5 bg-gradient-to-b from-accent via-blue-500 to-success origin-top"
+            className="absolute top-0 left-[-1px] w-0.5 bg-blue-500 origin-top"
             initial={{ scaleY: 0 }}
-            animate={{ scaleY: Math.min(currentStep / (PIPELINE_STEPS.length - 1), 1) }}
-            transition={{ duration: speedMs / 1000, ease: "linear" }}
+            animate={{ scaleY: Math.min(Math.max(currentStep, 0) / (PIPELINE_STEPS.length - 1), 1) }}
+            transition={{ duration: speedMs / 1000, ease: 'linear' }}
             style={{ height: '100%' }}
           />
         )}
@@ -96,82 +101,52 @@ export default function AIThinking({
           const isCompleted = currentStep > index;
           const isCurrent = currentStep === index;
           const isPending = currentStep < index;
-          
           const Icon = step.icon;
 
           return (
-            <div key={step.id} className="relative flex items-center gap-4 group">
-              {/* Node Indicator */}
-              <div className="absolute -left-[25px] flex items-center justify-center">
-                <motion.div
-                  initial={false}
-                  animate={{
-                    scale: isCurrent ? 1.2 : 1,
-                    backgroundColor: isCompleted 
-                      ? "rgba(16, 185, 129, 1)" // success emerald
-                      : isCurrent 
-                        ? "rgba(139, 92, 246, 1)" // accent violet
-                        : "rgba(24, 24, 27, 1)", // surface zinc-900
-                    borderColor: isCompleted 
-                      ? "rgba(16, 185, 129, 0.5)"
-                      : isCurrent 
-                        ? "rgba(139, 92, 246, 0.5)"
-                        : "rgba(255, 255, 255, 0.1)",
-                  }}
-                  transition={animationConfig.framer.apple}
+            <div key={step.id} className="relative flex items-center gap-3">
+              <div className="absolute -left-[22px] flex items-center justify-center">
+                <div
                   className={cn(
-                    "h-4 w-4 rounded-full border-2 ring-4 ring-[#09090b]",
-                    isCurrent && "shadow-[0_0_12px_rgba(139,92,246,0.6)]"
+                    'h-2.5 w-2.5 rounded-full border transition-colors',
+                    isCompleted
+                      ? 'bg-emerald-400 border-emerald-400'
+                      : isCurrent
+                        ? 'bg-blue-400 border-blue-400'
+                        : 'bg-[#11141C] border-slate-600'
                   )}
                 />
               </div>
 
-              {/* Step Content */}
               <motion.div
                 initial={false}
-                animate={{
-                  opacity: isPending ? 0.4 : 1,
-                  x: isCurrent ? 4 : 0,
-                }}
+                animate={{ opacity: isPending ? 0.45 : 1 }}
                 transition={animationConfig.framer.apple}
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-xl transition-colors duration-300 w-full",
-                  isCurrent ? "bg-white/5 border border-white/10 shadow-sm" : "border border-transparent"
+                  'flex items-center gap-3 px-3 py-2 rounded-lg w-full transition-colors',
+                  isCurrent ? 'bg-blue-500/10 border border-blue-500/25' : 'border border-transparent'
                 )}
               >
-                <div className={cn(
-                  "p-2 rounded-lg flex items-center justify-center transition-colors",
-                  isCompleted ? "bg-success/20 text-success" 
-                  : isCurrent ? "bg-accent/20 text-accent" 
-                  : "bg-white/5 text-secondary"
-                )}>
-                  <Icon className={cn("h-4 w-4", isCurrent && step.id === 'flash' && "animate-pulse")} />
-                </div>
-                
-                <span className={cn(
-                  "text-sm font-medium transition-colors",
-                  isCompleted ? "text-primary" 
-                  : isCurrent ? "text-gradient-ai font-semibold" 
-                  : "text-secondary"
-                )}>
+                <Icon
+                  className={cn(
+                    'h-4 w-4 shrink-0',
+                    isCompleted ? 'text-emerald-400' : isCurrent ? 'text-blue-400' : 'text-slate-500'
+                  )}
+                />
+
+                <span
+                  className={cn(
+                    'text-xs font-medium',
+                    isCompleted ? 'text-slate-100' : isCurrent ? 'text-blue-300' : 'text-slate-400'
+                  )}
+                >
                   {step.label}
                 </span>
 
-                {/* Status Indicator text on right */}
-                {isCurrent && (
-                  <motion.span 
-                    initial={{ opacity: 0 }} 
-                    animate={{ opacity: 1 }} 
-                    className="ml-auto text-xs text-accent font-mono"
-                  >
-                    evaluating...
-                  </motion.span>
-                )}
-                {isCompleted && (
-                  <span className="ml-auto text-xs text-success font-mono flex items-center gap-1">
-                    <CheckCircle2 className="h-3 w-3" /> done
-                  </span>
-                )}
+                <span className="ml-auto text-[11px] font-mono tabular-nums">
+                  {isCurrent && <span className="text-blue-400">running</span>}
+                  {isCompleted && <span className="text-emerald-400">ok</span>}
+                </span>
               </motion.div>
             </div>
           );

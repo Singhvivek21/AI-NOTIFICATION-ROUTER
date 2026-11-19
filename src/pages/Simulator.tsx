@@ -1,418 +1,443 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Play, 
-  RotateCcw, 
-  Settings2, 
-  MessageSquare,
-  ShieldAlert,
-  Briefcase,
-  ShoppingBag,
-  Zap,
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import {
+  Play,
+  Sparkles,
+  RotateCcw,
+  RefreshCw,
   AlertCircle,
-  Users,
-  Lock
+  Loader2,
+  Database,
+  GitBranch,
 } from 'lucide-react';
-import PhoneSimulator, { NotificationData } from '../components/simulator/PhoneSimulator';
+import PhoneSimulator, { type NotificationData } from '../components/simulator/PhoneSimulator';
 import AIThinking from '../components/shared/AIThinking';
-import DecisionCard, { RoutingAction } from '../components/shared/DecisionCard';
+import DecisionCard from '../components/shared/DecisionCard';
+import ContextInspector from '../components/shared/ContextInspector';
 import PipelineFlow from '../components/shared/PipelineFlow';
-import { cn, buttonVariants } from '../theme';
-import { simulationService, ScenarioData } from '../services/simulationService';
-import { RoutingDecision } from '../services/notificationService';
+import { simulationService, type ScenarioData } from '../services/simulationService';
+import { datasetService, type FullMessageContextDTO } from '../services/datasetService';
+import type { RoutingDecision } from '../services/notificationService';
+import { cn } from '../theme';
 
-type Speed = 'normal' | 'fast' | 'blazing';
-
-const SPEED_MAP: Record<Speed, number> = {
-  normal: 1000,
-  fast: 500,
-  blazing: 200,
-};
+const CATEGORY_TABS = [
+  'All',
+  'Domain Spoofing',
+  'Prompt Injection',
+  'Urgent / Actionable',
+  'Scam / Phishing',
+  'Opted-Out Promo',
+  'Voice Note',
+  'Image Media',
+];
 
 export default function Simulator() {
-  type DemoState = 'idle' | 'notification' | 'thinking' | 'pipeline' | 'decision';
-  const [demoState, setDemoState] = useState<DemoState>('idle');
+  const [searchParams, setSearchParams] = useSearchParams();
   const [scenarios, setScenarios] = useState<ScenarioData[]>([]);
-  const [selectedScenarioId, setSelectedScenarioId] = useState<string>('');
-  const [isSimulating, setIsSimulating] = useState(false);
-  const [pipelineStep, setPipelineStep] = useState(0);
-  const [autoPlay, setAutoPlay] = useState(false);
-  const [speed, setSpeed] = useState<Speed>('normal');
-  const [decision, setDecision] = useState<RoutingDecision | null>(null);
+  const [selectedTag, setSelectedTag] = useState<string>('All');
+  const [selectedId, setSelectedId] = useState<string>('');
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [presentationCount, setPresentationCount] = useState(0);
+  const [isTracing, setIsTracing] = useState(false);
+  const [isGeminiLoading, setIsGeminiLoading] = useState(false);
+  const [geminiError, setGeminiError] = useState<string | null>(null);
+  const [autoCycle, setAutoCycle] = useState(false);
+  const [pipelineStep, setPipelineStep] = useState<number>(10);
+  const [activeDecision, setActiveDecision] = useState<RoutingDecision | null>(null);
+  const [contextData, setContextData] = useState<FullMessageContextDTO | null>(null);
+  const [contextLoading, setContextLoading] = useState(false);
+  const [lowerTab, setLowerTab] = useState<'context' | 'pipeline'>('context');
 
-  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const autoPlayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const sequenceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const selectedScenarioIdRef = useRef(selectedScenarioId);
-  const scenariosRef = useRef(scenarios);
-
+  // Load all 110 scenarios from backend
   useEffect(() => {
-    selectedScenarioIdRef.current = selectedScenarioId;
-  }, [selectedScenarioId]);
-
-  useEffect(() => {
-    scenariosRef.current = scenarios;
-  }, [scenarios]);
-
-  useEffect(() => {
-    simulationService.getScenarios().then((data) => {
-      setScenarios(data);
-      if (data.length > 0) {
-        setSelectedScenarioId(data[0].id);
-      }
-    }).catch(err => {
-      console.error("Failed to load scenarios", err);
-    });
+    let active = true;
+    simulationService
+      .getScenarios()
+      .then((list) => {
+        if (!active) return;
+        setScenarios(list);
+        const paramId = searchParams.get('id');
+        const initial = (paramId && list.find((s) => s.id === paramId)) || list[0];
+        if (initial) {
+          setSelectedId(initial.id);
+          setActiveDecision(initial.decision);
+        }
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setError(err instanceof Error ? err.message : 'Failed to load messages from server.');
+        setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
-  const selectedScenario = scenarios.find(s => s.id === selectedScenarioId) || scenarios[0];
-  
-  // Use demoState to control visibility for a perfect sequence
-  const showNotification = demoState !== 'idle';
-  const showThinking = demoState === 'thinking' || demoState === 'pipeline' || demoState === 'decision';
-  const showDecision = demoState === 'decision';
-  const showOverlay = demoState !== 'decision';
+  const filteredScenarios = useMemo(() => {
+    if (selectedTag === 'All') return scenarios;
+    return scenarios.filter((s) => s.tag === selectedTag);
+  }, [scenarios, selectedTag]);
 
-  const getMockNotification = (): NotificationData => {
-    if (!selectedScenario) return { id: '', type: 'personal', sender: '', message: '', time: 'Now', isVerified: false };
-    
-    return {
-      id: selectedScenario.id,
-      type: selectedScenario.type,
-      sender: selectedScenario.sender,
-      message: selectedScenario.description,
-      time: 'Now',
-      isVerified: selectedScenario.type === 'business'
+  const activeScenario = useMemo(() => {
+    return scenarios.find((s) => s.id === selectedId) || filteredScenarios[0] || null;
+  }, [scenarios, filteredScenarios, selectedId]);
+
+  // Fetch full 360-degree joined context whenever selected message changes
+  useEffect(() => {
+    if (!activeScenario) return;
+    let active = true;
+    setContextLoading(true);
+    setGeminiError(null);
+    setActiveDecision(activeScenario.decision);
+
+    datasetService
+      .getMessageContext(activeScenario.id)
+      .then((res) => {
+        if (!active) return;
+        setContextData(res.context);
+        setActiveDecision(res.decision);
+        setContextLoading(false);
+      })
+      .catch(() => {
+        if (active) setContextLoading(false);
+      });
+
+    return () => {
+      active = false;
     };
+  }, [activeScenario?.id]);
+
+  const handleSelectScenario = (id: string) => {
+    setSelectedId(id);
+    setSearchParams({ id }, { replace: true });
+    setIsTracing(false);
+    setPipelineStep(10);
+    setGeminiError(null);
   };
 
-  const runLocalSimulation = () => {
+  const handleTagSelect = (tag: string) => {
+    setSelectedTag(tag);
+    const matching = tag === 'All' ? scenarios : scenarios.filter((s) => s.tag === tag);
+    if (matching.length > 0 && !matching.some((s) => s.id === selectedId)) {
+      handleSelectScenario(matching[0].id);
+    }
+  };
+
+  const handleRunTrace = useCallback(() => {
+    if (!activeScenario) return;
+    setGeminiError(null);
+    setIsTracing(true);
+    setPipelineStep(0);
+    setActiveDecision(null);
+
     let step = 0;
-    pollIntervalRef.current = setInterval(() => {
-      step += 1;
-      setPipelineStep(step);
-      
+    const timer = setInterval(() => {
+      step += 2;
+      setPipelineStep(Math.min(10, step));
       if (step >= 10) {
-        if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-        setIsSimulating(false);
-        setDecision(selectedScenario.decision);
-        setDemoState('decision');
-        scheduleAutoPlayNext();
+        clearInterval(timer);
       }
-    }, SPEED_MAP[speed]);
-  };
+    }, 450);
+  }, [activeScenario]);
 
-  const startDemoSequence = () => {
-    handleReset(true);
-    setDemoState('notification');
-    
-    // Sequence: Notification (1.5s) -> Thinking (1.5s) -> Pipeline 
-    if (sequenceTimeoutRef.current) clearTimeout(sequenceTimeoutRef.current);
-    
-    sequenceTimeoutRef.current = setTimeout(() => {
-      setDemoState('thinking');
-      
-      sequenceTimeoutRef.current = setTimeout(() => {
-        setDemoState('pipeline');
-        executeSimulation();
-      }, 1500);
-      
-    }, 1500);
-  };
+  const handleTraceComplete = useCallback(() => {
+    setIsTracing(false);
+    setPipelineStep(10);
+    if (activeScenario) {
+      setActiveDecision(activeScenario.decision);
+    }
+  }, [activeScenario]);
 
-  const executeSimulation = async () => {
-    if (pipelineStep >= 10) setPipelineStep(0);
-    
-    setIsSimulating(true);
-    setDecision(null);
-    setError(null);
-    
-    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-    if (autoPlayTimeoutRef.current) clearTimeout(autoPlayTimeoutRef.current);
+  const handleRunLiveGemini = async () => {
+    if (!activeScenario || isGeminiLoading) return;
+    setGeminiError(null);
+    setIsGeminiLoading(true);
+    setIsTracing(true);
+    setPipelineStep(5);
 
     try {
-      const { simulationId } = await simulationService.startSimulation(selectedScenarioId);
-      
-      pollIntervalRef.current = setInterval(async () => {
-        try {
-          const status = await simulationService.getSimulationStatus(simulationId);
-          setPipelineStep(status.currentStep);
-          
-          if (status.status === 'completed' || status.status === 'failed') {
-            if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-            setIsSimulating(false);
-            
-            if (status.status === 'completed' && status.decision) {
-              setDecision(status.decision);
-              setDemoState('decision');
-            } else if (status.status === 'failed') {
-              setError(status.message || 'Simulation failed');
-              setDemoState('decision');
-            }
-            scheduleAutoPlayNext();
-          }
-        } catch (err) {
-          console.error("Polling error", err);
-          if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-          setIsSimulating(false);
-          setError("Failed to fetch simulation status");
-          setDemoState('decision');
-        }
-      }, SPEED_MAP[speed]);
-    } catch (err) {
-      console.error("API Error, falling back to local simulation", err);
-      runLocalSimulation();
+      const res = await datasetService.routeWithGemini(activeScenario.id);
+      setActiveDecision(res.decision);
+      setContextData(res.context);
+      setScenarios((prev) =>
+        prev.map((item) =>
+          item.id === activeScenario.id ? { ...item, decision: res.decision } : item
+        )
+      );
+      setPipelineStep(10);
+    } catch (err: unknown) {
+      const serverMsg =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+        (err instanceof Error ? err.message : 'Live Gemini routing failed.');
+      setGeminiError(serverMsg);
+      setActiveDecision(activeScenario.decision);
+    } finally {
+      setIsGeminiLoading(false);
+      setIsTracing(false);
     }
   };
 
-  const scheduleAutoPlayNext = () => {
-    if (autoPlayTimeoutRef.current) clearTimeout(autoPlayTimeoutRef.current);
-    autoPlayTimeoutRef.current = setTimeout(() => {
-      setAutoPlay(currentAutoPlay => {
-        if (currentAutoPlay) {
-          setPresentationCount(prevCount => {
-            const nextCount = prevCount + 1;
-            if (nextCount > 5 || nextCount > scenariosRef.current.length) {
-              setTimeout(() => {
-                setAutoPlay(false);
-                setPresentationCount(0);
-              }, 0);
-              return 0;
-            }
-            const currentIndex = scenariosRef.current.findIndex(s => s.id === selectedScenarioIdRef.current);
-            const nextIndex = (currentIndex + 1) % scenariosRef.current.length;
-            setSelectedScenarioId(scenariosRef.current[nextIndex].id);
-            setDemoState('idle'); 
-            return nextCount;
-          });
-        }
-        return currentAutoPlay;
-      });
-    }, 2000);
-  };
-
-  // Trigger simulation when scenario changes or autoplay is toggled
+  // Auto-cycle across filtered scenarios
   useEffect(() => {
-    if (autoPlay && !isSimulating && demoState === 'idle') {
-      startDemoSequence();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedScenarioId, autoPlay, demoState]);
+    if (!autoCycle || filteredScenarios.length <= 1) return;
+    const interval = setInterval(() => {
+      const idx = filteredScenarios.findIndex((s) => s.id === activeScenario?.id);
+      const next = filteredScenarios[(idx + 1) % filteredScenarios.length];
+      if (next) {
+        handleSelectScenario(next.id);
+      }
+    }, 5500);
+    return () => clearInterval(interval);
+  }, [autoCycle, filteredScenarios, activeScenario?.id]);
 
-  const handleReset = (preserveAutoPlay = false) => {
-    setIsSimulating(false);
-    if (!preserveAutoPlay) {
-      setAutoPlay(false);
-      setPresentationCount(0);
-    }
-    setPipelineStep(0);
-    setDecision(null);
-    setError(null);
-    setDemoState('idle');
-    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-    if (autoPlayTimeoutRef.current) clearTimeout(autoPlayTimeoutRef.current);
-    if (sequenceTimeoutRef.current) clearTimeout(sequenceTimeoutRef.current);
-  };
+  const phoneNotification: NotificationData | null = activeScenario
+    ? {
+        id: activeScenario.id,
+        type: activeScenario.type,
+        sender: activeScenario.sender,
+        channelName: activeScenario.channelName,
+        message: activeScenario.description,
+        isVerified: activeScenario.isVerified,
+        time: activeScenario.createdAt.slice(11, 16) || 'Now',
+        mediaType: activeScenario.mediaType,
+        forwardedCount: activeScenario.forwardedCount,
+        riskFlags: activeScenario.riskFlags,
+        action: activeDecision?.action,
+      }
+    : null;
 
-  useEffect(() => {
-    return () => {
-      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-      if (autoPlayTimeoutRef.current) clearTimeout(autoPlayTimeoutRef.current);
-    };
-  }, []);
-
-  const getIcon = (name: string) => {
-    switch (name) {
-      case 'Briefcase': return Briefcase;
-      case 'MessageSquare': return MessageSquare;
-      default: return MessageSquare;
-    }
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-24 text-sm text-slate-400 gap-2">
+        <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
+        <span>Loading 110 messages from dataset...</span>
+      </div>
+    );
   }
-  const ScenarioIcon = selectedScenario ? getIcon(selectedScenario.icon) : MessageSquare;
-  const currentDecision = decision || (selectedScenario ? selectedScenario.decision : null);
 
-  if (!selectedScenario) {
-    return <div className="p-8">Loading scenarios...</div>;
+  if (error || !activeScenario) {
+    return (
+      <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-5 text-sm text-rose-200 flex items-center gap-3">
+        <AlertCircle className="h-5 w-5 text-rose-400 shrink-0" />
+        <span>{error || 'No messages available in dataset.'}</span>
+      </div>
+    );
   }
 
   return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="flex flex-col gap-6 w-full pb-24 h-full"
-    >
-      <div className="glass-panel rounded-2xl p-4 flex flex-col lg:flex-row items-center justify-between gap-4 sticky top-16 z-30 shadow-glass">
-        <div className="flex items-center gap-3 w-full lg:w-auto overflow-x-auto pb-2 lg:pb-0 scrollbar-hide">
-          <div className="flex items-center gap-2 mr-2 text-secondary shrink-0">
-            <MessageSquare className="h-4 w-4" />
-            <span className="text-sm font-medium uppercase tracking-wider">Payload:</span>
-          </div>
-          <div className="flex gap-2">
-            {scenarios.map(scenario => {
-              const Icon = getIcon(scenario.icon);
-              return (
-                <button
-                  key={scenario.id}
-                  onClick={() => {
-                    setSelectedScenarioId(scenario.id);
-                    handleReset();
-                  }}
-                  className={cn(
-                    "flex items-center gap-2 px-3 py-1.5 rounded-xl border text-sm font-medium transition-all whitespace-nowrap",
-                    selectedScenarioId === scenario.id 
-                      ? "bg-accent/20 border-accent/40 text-accent shadow-[0_0_15px_rgba(139,92,246,0.15)]" 
-                      : "bg-white/5 border-white/10 text-secondary hover:bg-white/10 hover:text-primary"
-                  )}
-                >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  {scenario.label}
-                </button>
-              );
-            })}
-          </div>
+    <div className="space-y-6">
+      {/* Header & Primary Action Controls */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold tracking-tight text-white">
+            Interactive Message Simulator
+          </h2>
+          <p className="text-sm text-slate-400 mt-0.5">
+            Inspect any of the {scenarios.length} incoming messages, view joined CSV evidence, or trigger a live Gemini Flash + Reflection pass.
+          </p>
         </div>
 
-        <div className="flex items-center gap-3 w-full lg:w-auto justify-between lg:justify-end shrink-0">
-          <div className="flex items-center bg-black/40 rounded-xl p-1 border border-white/5">
-            {(['normal', 'fast', 'blazing'] as Speed[]).map(s => (
-              <button
-                key={s}
-                onClick={() => setSpeed(s)}
-                className={cn(
-                  "px-3 py-1 rounded-lg text-xs font-medium capitalize transition-all",
-                  speed === s ? "bg-white/10 text-primary shadow-sm" : "text-secondary hover:text-primary"
-                )}
-              >
-                {s === 'blazing' ? <Zap className="h-3.5 w-3.5 inline mr-1" /> : null}
-                {s}
-              </button>
-            ))}
-          </div>
-
-          <div className="w-px h-6 bg-white/10 mx-1" />
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={handleRunTrace}
+            disabled={isTracing || isGeminiLoading}
+            className="inline-flex items-center gap-2 h-9 px-3.5 rounded-lg bg-[#11141C] hover:bg-[#181C27] border border-white/[0.1] text-xs font-semibold text-slate-100 disabled:opacity-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <Play className="h-3.5 w-3.5 text-emerald-400" />
+            <span>Run Trace</span>
+          </button>
 
           <button
-            onClick={() => {
-              if (autoPlay) {
-                handleReset();
-                setPresentationCount(0);
-              } else {
-                handleReset();
-                if (scenarios.length > 0) {
-                  setSelectedScenarioId(scenarios[0].id);
-                  setPresentationCount(1);
-                  setAutoPlay(true);
-                  setDemoState('idle');
-                }
-              }
-            }}
+            type="button"
+            onClick={handleRunLiveGemini}
+            disabled={isGeminiLoading}
+            className="inline-flex items-center gap-2 h-9 px-3.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white disabled:opacity-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            {isGeminiLoading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="h-3.5 w-3.5" />
+            )}
+            <span>{isGeminiLoading ? 'Running Gemini...' : 'Run Live Gemini'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setAutoCycle((prev) => !prev)}
             className={cn(
-              buttonVariants.base,
-              "h-9 px-5 gap-2 border shadow-sm transition-all overflow-hidden relative group rounded-xl shrink-0",
-              autoPlay 
-                ? "bg-warning/20 border-warning/30 text-warning" 
-                : "bg-white text-black hover:bg-neutral-200 border-transparent shadow-[0_0_15px_rgba(255,255,255,0.15)]"
+              'inline-flex items-center gap-2 h-9 px-3.5 rounded-lg border text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer',
+              autoCycle
+                ? 'bg-amber-500/15 border-amber-500/35 text-amber-300'
+                : 'bg-[#11141C] hover:bg-[#181C27] border-white/[0.1] text-slate-300'
             )}
           >
-            {autoPlay ? (
-              <>
-                <span className="w-2 h-2 rounded-full bg-warning animate-pulse" />
-                Stop Presentation
-              </>
-            ) : (
-              <>
-                <Play className="h-4 w-4 fill-current" />
-                Start Presentation
-              </>
-            )}
+            <RefreshCw className={cn('h-3.5 w-3.5', autoCycle && 'animate-spin')} />
+            <span>{autoCycle ? 'Stop Cycle' : 'Auto-Cycle'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setAutoCycle(false);
+              setIsTracing(false);
+              setPipelineStep(10);
+              setGeminiError(null);
+              setActiveDecision(activeScenario.decision);
+            }}
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-[#11141C] hover:bg-[#181C27] border border-white/[0.1] text-xs font-medium text-slate-400 hover:text-slate-100 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            title="Reset simulator state"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            <span>Reset</span>
           </button>
         </div>
       </div>
-      
-      {error && (
-        <div className="bg-warning/10 border border-warning/30 text-warning px-4 py-2 rounded-xl flex items-center gap-2 text-sm w-fit mx-auto mt-4">
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          {error}
+
+      {/* Category Filter Tabs + Message Picker */}
+      <div className="bg-[#11141C] border border-white/[0.08] rounded-xl p-4 space-y-3.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {CATEGORY_TABS.map((tag) => {
+            const count =
+              tag === 'All'
+                ? scenarios.length
+                : scenarios.filter((s) => s.tag === tag).length;
+            const active = selectedTag === tag;
+            return (
+              <button
+                key={tag}
+                type="button"
+                onClick={() => handleTagSelect(tag)}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer',
+                  active
+                    ? 'bg-blue-500/15 text-blue-300 border border-blue-500/30'
+                    : 'text-slate-400 hover:text-slate-100 hover:bg-white/[0.04] border border-transparent'
+                )}
+              >
+                {tag}{' '}
+                <span className="font-mono tabular-nums text-[11px] opacity-75 ml-1">
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 pt-2 border-t border-white/[0.06]">
+          <label
+            htmlFor="message-select"
+            className="text-xs font-semibold text-slate-400 uppercase tracking-wider shrink-0"
+          >
+            Active Message
+          </label>
+          <select
+            id="message-select"
+            value={activeScenario.id}
+            onChange={(e) => handleSelectScenario(e.target.value)}
+            className="flex-1 h-9 px-3 rounded-lg bg-[#090B10] border border-white/[0.1] text-xs text-slate-100 font-mono focus:outline-none focus:border-blue-500/50"
+          >
+            {filteredScenarios.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.id} · [{s.decision.action.toUpperCase()}] {s.sender} — {s.description.slice(0, 72)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Live Gemini Error Banner (propagates real API error) */}
+      {geminiError && (
+        <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-4 text-xs text-rose-200 flex items-start gap-3">
+          <AlertCircle className="h-4 w-4 text-rose-400 shrink-0 mt-0.5" />
+          <div>
+            <div className="font-semibold text-rose-100 mb-0.5">Live Gemini Pass Error</div>
+            <p className="text-rose-200/90 leading-relaxed">{geminiError}</p>
+          </div>
         </div>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 xl:gap-8 items-start flex-1 min-h-[700px] mt-2">
-         <div className="flex justify-center xl:justify-end xl:pr-4 h-full items-center">
-            <div className="scale-[0.80] sm:scale-95 xl:scale-100 origin-center transition-transform duration-500">
-               <PhoneSimulator 
-                 customNotification={showNotification ? getMockNotification() : null}
-                 disableLoop={true}
-               />
-            </div>
-         </div>
-         
-         <div className="flex flex-col gap-6 w-full max-w-md mx-auto xl:max-w-none h-full justify-center">
-            <AIThinking 
-              isActive={showThinking} 
-              speedMs={SPEED_MAP[speed]} 
-              className="w-full max-h-[720px]"
+      {/* Main Split Stage: Phone Preview + Decision / Trace */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+        <div className="xl:col-span-4 flex flex-col items-center">
+          <PhoneSimulator customNotification={phoneNotification} disableLoop={true} />
+        </div>
+
+        <div className="xl:col-span-8 space-y-5">
+          {isTracing && (
+            <AIThinking
+              isActive={isTracing}
+              speedMs={isGeminiLoading ? 950 : 280}
+              modeLabel={isGeminiLoading ? 'Live Gemini Pass' : 'Trace Simulation'}
+              onComplete={isGeminiLoading ? undefined : handleTraceComplete}
             />
-         </div>
+          )}
 
-         <div className="flex flex-col gap-6 w-full max-w-md mx-auto xl:max-w-none h-full justify-center">
-            <div className="relative w-full">
-              <AnimatePresence>
-                {showOverlay && (
-                  <motion.div 
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="absolute inset-0 z-20 bg-background/60 backdrop-blur-md rounded-3xl flex flex-col items-center justify-center border border-white/5 shadow-2xl"
-                  >
-                    <div className="h-16 w-16 mb-6 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center shadow-glow">
-                      <ScenarioIcon className="h-8 w-8 text-primary" />
-                    </div>
-                    <div className="flex items-center gap-3 mb-2">
-                      {isSimulating ? (
-                        <>
-                          <div className="h-2.5 w-2.5 rounded-full bg-accent animate-ping" />
-                          <span className="text-sm font-semibold text-accent uppercase tracking-widest">
-                            Analyzing Payload...
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          <Settings2 className="h-4 w-4 text-secondary" />
-                          <span className="text-sm font-semibold text-secondary uppercase tracking-widest">
-                            Awaiting Execution
-                          </span>
-                        </>
-                      )}
-                    </div>
-                    <p className="text-sm text-secondary/60 text-center max-w-[200px] mt-2">
-                      {selectedScenario.description}
-                    </p>
-                  </motion.div>
+          {activeDecision && (
+            <DecisionCard
+              action={activeDecision.action}
+              messageType={activeDecision.messageType}
+              reason={activeDecision.reason}
+              confidence={activeDecision.confidence}
+              evidenceIds={activeDecision.evidenceIds}
+              trustScore={activeDecision.trustScore}
+              spamProbability={activeDecision.spamProbability}
+              urgency={activeDecision.urgency}
+              reflectionResult={activeDecision.reflectionResult}
+              source={activeDecision.source}
+              modelUsed={activeDecision.modelUsed}
+              riskFlags={activeScenario.riskFlags}
+            />
+          )}
+
+          {/* Lower Detail Tabs: 360° Relational Context vs 10-Stage Architecture */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 border-b border-white/[0.08] pb-2">
+              <button
+                type="button"
+                onClick={() => setLowerTab('context')}
+                className={cn(
+                  'inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer',
+                  lowerTab === 'context'
+                    ? 'bg-blue-500/15 text-blue-300 border border-blue-500/25'
+                    : 'text-slate-400 hover:text-slate-200'
                 )}
-              </AnimatePresence>
-
-              <DecisionCard
-                action={currentDecision.action}
-                reason={currentDecision.reason}
-                confidence={currentDecision.confidence}
-                evidenceIds={currentDecision.evidenceIds}
-                trustScore={currentDecision.trustScore}
-                spamProbability={currentDecision.spamProbability}
-                urgency={currentDecision.urgency}
-                reflectionResult={currentDecision.reflectionResult}
-                className={!showDecision ? "opacity-20 grayscale transition-all duration-1000 scale-95 blur-sm" : "transition-all duration-500 scale-100 blur-0"}
-              />
+              >
+                <Database className="h-3.5 w-3.5" />
+                <span>360° Joined CSV Context</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setLowerTab('pipeline')}
+                className={cn(
+                  'inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer',
+                  lowerTab === 'pipeline'
+                    ? 'bg-blue-500/15 text-blue-300 border border-blue-500/25'
+                    : 'text-slate-400 hover:text-slate-200'
+                )}
+              >
+                <GitBranch className="h-3.5 w-3.5" />
+                <span>10-Stage Pipeline Flow</span>
+              </button>
             </div>
-         </div>
+
+            {lowerTab === 'context' ? (
+              contextLoading || !contextData ? (
+                <div className="bg-[#11141C] border border-white/[0.08] rounded-xl p-6 text-xs text-slate-400 flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
+                  <span>Joining relational CSV records for {activeScenario.id}...</span>
+                </div>
+              ) : (
+                <ContextInspector context={contextData} />
+              )
+            ) : (
+              <PipelineFlow currentStepIndex={pipelineStep} isFailed={Boolean(geminiError)} />
+            )}
+          </div>
+        </div>
       </div>
-      
-      <div className="w-full mt-4 glass-panel rounded-3xl p-2 sm:p-6 mb-8 shrink-0">
-         <PipelineFlow currentStepIndex={pipelineStep} />
-      </div>
-    </motion.div>
+    </div>
   );
 }
-

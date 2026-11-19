@@ -1,6 +1,8 @@
 {
-  "name": "AI Hackathon Workspace",
-  "description": "A foundation for building scalable, agentic AI solutions for the hackathon.",
+  "name": "SignalRoute — Context-Aware Notification Router",
+  "description": "Multi-stage AI notification routing and reflection console powered by 13 relational user, business, group, and message history datasets.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
